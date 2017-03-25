@@ -1,0 +1,15 @@
+{
+	"root_folder":"/mnt/data/bigdata/Podcast/",
+	"keep_per_podcast":10,
+	"download_threads":10,
+	"podcasts":[
+		{
+			"folder":"The Jason Stapleton Program",
+			"url":"https://audioboom.com/channels/4667410.rss"
+		},
+		{
+			"folder":"The Fifth Column",
+			"url":"http://fifthcolumn.podbean.com/feed/"
+		}
+	]	
+}

@@ -1,0 +1,91 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# On windows, you must run this command in the console first: chcp 65001
+# otherwise, any feed with unicode will break the parser.
+
+import feedparser, time, datetime, json, os, requests, glob, re, pprint
+from concurrent.futures import ThreadPoolExecutor
+
+def santize_filename(filename):
+    filename = re.sub('__+', '_', re.sub(r'[^\w.-]', '_', filename))
+    filename = re.sub('^[-_.]+', '', filename)
+    filename = re.sub('[-_.]+$', '', filename)
+    
+    if len(filename) > 100:
+        filename = filename[:100] + '...'
+    
+    return filename
+
+def download_episode(url, path):
+    try:
+        r = requests.get(url, stream=True, timeout=15)
+        with open(path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024 * 5): 
+                if chunk:
+                    f.write(chunk)
+    except Exception:
+        print('\t\tError downloading %s' % url)
+
+def handle_podcast(podcast):
+    global config
+    entry_count = 0
+    
+    feed = feedparser.parse(podcast['url'])
+    
+    podcast_dir = os.path.join(config['root_folder'], podcast['folder'])
+    os.makedirs(podcast_dir, exist_ok=True)
+    
+    for entry in feed['entries']:
+        entry_count += 1
+        
+        if entry_count <= config['keep_per_podcast']:
+            audio = None
+            
+            for link in entry['links']:
+                if link['type'].startswith('audio/'):
+                    audio = link['href']
+                    break
+            
+            if not audio:
+                continue
+            
+            # My main motivation for writing this podcast catcher.  The following line converts the podcast into a sortable, 
+            # sane name, regardless of if the podcast episode was clearly named.
+            filename = os.path.join(podcast_dir, datetime.datetime.fromtimestamp(time.mktime(entry['published_parsed'])).strftime('%Y%m%d') + '_' + santize_filename(entry['title']) + '.mp3')
+            
+            if not os.path.isfile(filename):
+                print('\tNew Episode: %s - %s' % (podcast['folder'], entry['title']))
+                download_episode(audio, filename)
+
+def cleanup_episodes(podcast):
+    global config
+    podcast_dir = os.path.join(config['root_folder'], podcast['folder'])
+    
+    files = glob.glob(os.path.join(podcast_dir, "*.mp3"))
+    files.sort()
+    
+    while (len(files) > config['keep_per_podcast']):
+        file = files.pop(0);
+        os.unlink(file)
+
+path = os.path.dirname(os.path.abspath(__file__))
+
+with open(os.path.join(path, 'config.json')) as f:    
+    config = json.load(f)
+
+# Unfortunately, we have to thread per podcast and not per episode.
+# Many podcast feeds will throttle us into the ground if we download more than 
+# one episode at a time.
+with ThreadPoolExecutor(max_workers=config['download_threads']) as pool:
+    for podcast in config['podcasts']:
+        print('Checking feed: %s' % podcast['folder'])
+        pool.submit(handle_podcast, podcast)
+
+print('Cleaning up old episodes...')
+
+with ThreadPoolExecutor(max_workers=config['download_threads']) as pool:
+    for podcast in config['podcasts']:
+        pool.submit(cleanup_episodes, podcast)
+
+print('Done.')
